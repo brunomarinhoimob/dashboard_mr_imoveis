@@ -8,24 +8,16 @@ from datetime import date
 # CONFIGURAÇÃO DA PÁGINA
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Ranking por Equipe – MR Imóveis",
-    page_icon="👥",
+    page_title="Ranking por Corretor – MR Imóveis",
+    page_icon="🏆",
     layout="wide",
 )
 
-st.title("👥 Ranking por Equipe – MR Imóveis")
-
+st.title("🏆 Ranking por Corretor – MR Imóveis")
 st.caption(
-    "Filtre o período para ver o ranking das equipes "
+    "Filtre o período e (opcionalmente) uma equipe para ver o ranking de corretores "
     "em análises, aprovações, vendas e VGV."
 )
-
-# ---------------------------------------------------------
-# CONFIG: LINK DA PLANILHA
-# ---------------------------------------------------------
-SHEET_ID = "1Ir_fPugLsfHNk6iH0XPCA6xM92bq8tTrn7UnunGRwCw"
-GID_ANALISES = "1574157905"
-CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_ANALISES}"
 
 # ---------------------------------------------------------
 # FUNÇÃO AUXILIAR PARA LIMPAR DATA
@@ -35,7 +27,14 @@ def limpar_para_data(serie):
     return dt.dt.date
 
 # ---------------------------------------------------------
-# CARREGAR E PREPARAR DADOS
+# LINK DA PLANILHA
+# ---------------------------------------------------------
+SHEET_ID = "1Ir_fPugLsfHNk6iH0XPCA6xM92bq8tTrn7UnunGRwCw"
+GID_ANALISES = "1574157905"
+CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_ANALISES}"
+
+# ---------------------------------------------------------
+# CARREGAR DADOS
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def carregar_dados():
@@ -97,73 +96,94 @@ if df.empty:
     st.stop()
 
 # ---------------------------------------------------------
-# FILTRO DE PERÍODO — COM SESSION_STATE
+# 📌 FILTRO DE DATA FIXO ENTRE PÁGINAS (session_state)
 # ---------------------------------------------------------
-st.sidebar.title("Filtros 🔎")
 
 dias_validos = pd.Series(df["DIA"].dropna())
-
 if not dias_validos.empty:
-    data_min = dias_validos.min()
-    data_max = dias_validos.max()
+    data_min_base = dias_validos.min()
+    data_max_base = dias_validos.max()
 else:
     hoje = date.today()
-    data_min = hoje
-    data_max = hoje
+    data_min_base = hoje
+    data_max_base = hoje
 
-# 👇 Mantém a data fixa entre páginas
-if "periodo_filtro" not in st.session_state:
-    st.session_state["periodo_filtro"] = (data_min, data_max)
+# Se não existir no session_state, cria uma vez só
+if "periodo_corretor" not in st.session_state:
+    st.session_state["periodo_corretor"] = (data_min_base, data_max_base)
 
+# Widget usa o valor do session_state
 periodo = st.sidebar.date_input(
     "Período",
-    value=st.session_state["periodo_filtro"],
-    min_value=data_min,
-    max_value=data_max,
+    value=st.session_state["periodo_corretor"],
+    min_value=data_min_base,
+    max_value=data_max_base,
 )
 
-st.session_state["periodo_filtro"] = periodo
+# Atualiza session_state sempre que usuário mudar
+st.session_state["periodo_corretor"] = periodo
 
+# Extrai datas
 if isinstance(periodo, tuple):
     data_ini, data_fim = periodo
 else:
-    data_ini, data_fim = data_min, data_max
+    data_ini, data_fim = data_min_base, data_max_base
 
 # ---------------------------------------------------------
-# APLICA FILTRO DE DATA
+# FILTRO DE EQUIPE
+# ---------------------------------------------------------
+lista_equipes = sorted(df["EQUIPE"].dropna().unique())
+
+if "equipe_corretor" not in st.session_state:
+    st.session_state["equipe_corretor"] = "Todas"
+
+equipe_sel = st.sidebar.selectbox(
+    "Equipe (opcional)",
+    ["Todas"] + lista_equipes,
+    index=(["Todas"] + lista_equipes).index(st.session_state["equipe_corretor"])
+)
+
+st.session_state["equipe_corretor"] = equipe_sel
+
+# ---------------------------------------------------------
+# APLICA FILTROS
 # ---------------------------------------------------------
 df_periodo = df.copy()
 dia_series_all = limpar_para_data(df_periodo["DIA"])
 mask_data_all = (dia_series_all >= data_ini) & (dia_series_all <= data_fim)
 df_periodo = df_periodo[mask_data_all]
 
+if equipe_sel != "Todas":
+    df_periodo = df_periodo[df_periodo["EQUIPE"] == equipe_sel]
+
 registros_filtrados = len(df_periodo)
 
 st.caption(
     f"Período filtrado: **{data_ini.strftime('%d/%m/%Y')}** até "
-    f"**{data_fim.strftime('%d/%m/%Y')}** • Registros: **{registros_filtrados}**"
+    f"**{data_fim.strftime('%d/%m/%Y')}** • "
+    f"Registros considerados: **{registros_filtrados}**"
 )
+if equipe_sel != "Todas":
+    st.caption(f"Equipe filtrada: **{equipe_sel}**")
 
 if df_periodo.empty:
-    st.warning("Nenhum registro encontrado para o período filtrado.")
+    st.warning("Não há registros para o período / filtros selecionados.")
     st.stop()
 
 # ---------------------------------------------------------
-# AGRUPAMENTO POR EQUIPE
+# RANKING
 # ---------------------------------------------------------
-st.markdown("### 📊 Resumo geral por equipe")
-
 def conta_analises(s):
     return s.isin(["EM ANÁLISE", "REANÁLISE"]).sum()
-
-def conta_vendas(s):
-    return s.isin(["VENDA GERADA", "VENDA INFORMADA"]).sum()
 
 def conta_aprovacoes(s):
     return (s == "APROVADO").sum()
 
-rank_eq = (
-    df_periodo.groupby("EQUIPE")
+def conta_vendas(s):
+    return s.isin(["VENDA GERADA", "VENDA INFORMADA"]).sum()
+
+rank_cor = (
+    df_periodo.groupby("CORRETOR")
     .agg(
         ANALISES=("STATUS_BASE", conta_analises),
         APROVACOES=("STATUS_BASE", conta_aprovacoes),
@@ -173,38 +193,32 @@ rank_eq = (
     .reset_index()
 )
 
-rank_eq = rank_eq[
-    (rank_eq["ANALISES"] > 0)
-    | (rank_eq["APROVACOES"] > 0)
-    | (rank_eq["VENDAS"] > 0)
-    | (rank_eq["VGV"] > 0)
+rank_cor = rank_cor[
+    (rank_cor["ANALISES"] > 0)
+    | (rank_cor["APROVACOES"] > 0)
+    | (rank_cor["VENDAS"] > 0)
+    | (rank_cor["VGV"] > 0)
 ]
 
-if rank_eq.empty:
-    st.info("Nenhuma equipe com movimentação nesse período.")
-    st.stop()
-
-rank_eq["TAXA_APROV_ANALISES"] = np.where(
-    rank_eq["ANALISES"] > 0,
-    rank_eq["APROVACOES"] / rank_eq["ANALISES"] * 100,
-    0
+rank_cor["TAXA_APROV_ANALISES"] = np.where(
+    rank_cor["ANALISES"] > 0,
+    rank_cor["APROVACOES"] / rank_cor["ANALISES"] * 100,
+    0,
+)
+rank_cor["TAXA_VENDAS_ANALISES"] = np.where(
+    rank_cor["ANALISES"] > 0,
+    rank_cor["VENDAS"] / rank_cor["ANALISES"] * 100,
+    0,
 )
 
-rank_eq["TAXA_VENDAS_ANALISES"] = np.where(
-    rank_eq["ANALISES"] > 0,
-    rank_eq["VENDAS"] / rank_eq["ANALISES"] * 100,
-    0
-)
-
-rank_eq = rank_eq.sort_values(["VENDAS", "VGV"], ascending=False)
+rank_cor = rank_cor.sort_values(["VENDAS", "VGV"], ascending=False)
 
 # ---------------------------------------------------------
-# EXIBIÇÃO — TABELA EM CIMA, GRÁFICO EMBAIXO
+# EXIBIÇÃO
 # ---------------------------------------------------------
-
-st.markdown("#### 📋 Tabela detalhada do ranking por equipe")
+st.markdown("#### 📋 Tabela detalhada do ranking por corretor")
 st.dataframe(
-    rank_eq.style.format(
+    rank_cor.style.format(
         {
             "VGV": "R$ {:,.2f}".format,
             "TAXA_APROV_ANALISES": "{:.1f}%".format,
@@ -215,15 +229,15 @@ st.dataframe(
     hide_index=True,
 )
 
-st.markdown("#### 💰 VGV por equipe (período filtrado)")
-chart_vgv_eq = (
-    alt.Chart(rank_eq)
+st.markdown("#### 💰 VGV por corretor")
+chart_vgv = (
+    alt.Chart(rank_cor)
     .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
     .encode(
         x=alt.X("VGV:Q", title="VGV (R$)"),
-        y=alt.Y("EQUIPE:N", sort="-x", title="Equipe"),
+        y=alt.Y("CORRETOR:N", sort="-x", title="Corretor"),
         tooltip=[
-            "EQUIPE",
+            "CORRETOR",
             "ANALISES",
             "APROVACOES",
             "VENDAS",
@@ -234,12 +248,5 @@ chart_vgv_eq = (
     )
     .properties(height=500)
 )
-st.altair_chart(chart_vgv_eq, use_container_width=True)
+st.altair_chart(chart_vgv, use_container_width=True)
 
-st.markdown(
-    "<hr style='border-color:#1f2937'>"
-    "<p style='text-align:center; color:#6b7280;'>"
-    "Ranking por equipe baseado em análises, aprovações, vendas e VGV."
-    "</p>",
-    unsafe_allow_html=True,
-)
