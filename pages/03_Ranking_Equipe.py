@@ -97,7 +97,7 @@ if df.empty:
     st.stop()
 
 # ---------------------------------------------------------
-# FILTRO DE PERÍODO
+# FILTRO DE PERÍODO — COM SESSION_STATE
 # ---------------------------------------------------------
 st.sidebar.title("Filtros 🔎")
 
@@ -111,12 +111,18 @@ else:
     data_min = hoje
     data_max = hoje
 
+# 👇 Mantém a data fixa entre páginas
+if "periodo_filtro" not in st.session_state:
+    st.session_state["periodo_filtro"] = (data_min, data_max)
+
 periodo = st.sidebar.date_input(
     "Período",
-    value=(data_min, data_max),
+    value=st.session_state["periodo_filtro"],
     min_value=data_min,
     max_value=data_max,
 )
+
+st.session_state["periodo_filtro"] = periodo
 
 if isinstance(periodo, tuple):
     data_ini, data_fim = periodo
