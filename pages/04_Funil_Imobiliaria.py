@@ -242,43 +242,40 @@ df_funil_geral = pd.DataFrame(
     }
 )
 
-col_tab_f, col_chart_f = st.columns([2, 3])
+# 🔽 AGORA: TABELA EM CIMA, GRÁFICO EMBAIXO
+st.markdown("### 📋 Tabela do Funil Geral")
+st.dataframe(
+    df_funil_geral.style.format(
+        {"Conversão da etapa anterior (%)": "{:.1f}%".format}
+    ),
+    use_container_width=True,
+    hide_index=True,
+)
 
-with col_tab_f:
-    st.markdown("### 📋 Tabela do Funil Geral")
-    st.dataframe(
-        df_funil_geral.style.format(
-            {"Conversão da etapa anterior (%)": "{:.1f}%".format}
+st.markdown("### 📊 Gráfico do Funil Geral (Análises → Aprovações → Vendas)")
+chart_funil = (
+    alt.Chart(df_funil_geral)
+    .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+    .encode(
+        x=alt.X("Quantidade:Q", title="Quantidade"),
+        y=alt.Y(
+            "Etapa:N",
+            sort=["Análises (só EM)", "Aprovações", "Vendas"],
+            title="Etapa",
         ),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-with col_chart_f:
-    st.markdown("### 📊 Gráfico do Funil Geral (Análises → Aprovações → Vendas)")
-    chart_funil = (
-        alt.Chart(df_funil_geral)
-        .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
-        .encode(
-            x=alt.X("Quantidade:Q", title="Quantidade"),
-            y=alt.Y(
-                "Etapa:N",
-                sort=["Análises (só EM)", "Aprovações", "Vendas"],
-                title="Etapa",
+        tooltip=[
+            "Etapa",
+            "Quantidade",
+            alt.Tooltip(
+                "Conversão da etapa anterior (%)",
+                title="Conversão",
+                format=".1f",
             ),
-            tooltip=[
-                "Etapa",
-                "Quantidade",
-                alt.Tooltip(
-                    "Conversão da etapa anterior (%)",
-                    title="Conversão",
-                    format=".1f",
-                ),
-            ],
-        )
-        .properties(height=300)
+        ],
     )
-    st.altair_chart(chart_funil, use_container_width=True)
+    .properties(height=300)
+)
+st.altair_chart(chart_funil, use_container_width=True)
 
 # ---------------------------------------------------------
 # PLANEJAMENTO DA IMOBILIÁRIA (ÚLTIMOS 3 MESES)
@@ -452,59 +449,56 @@ else:
 
     rank_eq_funil = rank_eq_funil.sort_values(["VENDAS", "VGV"], ascending=False)
 
-    col_tab_eq, col_chart_eq = st.columns([2, 3])
+    # 🔽 TABELA EM CIMA, GRÁFICO EMBAIXO
+    st.markdown("### 📋 Tabela do Funil por Equipe")
+    st.dataframe(
+        rank_eq_funil.style.format(
+            {
+                "VGV": "R$ {:,.2f}".format,
+                "TAXA_APROV_ANALISES": "{:.1f}%".format,
+                "TAXA_VENDAS_ANALISES": "{:.1f}%".format,
+                "TAXA_VENDAS_APROV": "{:.1f}%".format,
+            }
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    with col_tab_eq:
-        st.markdown("### 📋 Tabela do Funil por Equipe")
-        st.dataframe(
-            rank_eq_funil.style.format(
-                {
-                    "VGV": "R$ {:,.2f}".format,
-                    "TAXA_APROV_ANALISES": "{:.1f}%".format,
-                    "TAXA_VENDAS_ANALISES": "{:.1f}%".format,
-                    "TAXA_VENDAS_APROV": "{:.1f}%".format,
-                }
-            ),
-            use_container_width=True,
-            hide_index=True,
+    st.markdown("### 💰 VGV por Equipe")
+    chart_eq_vgv = (
+        alt.Chart(rank_eq_funil)
+        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+        .encode(
+            x=alt.X("VGV:Q", title="VGV (R$)"),
+            y=alt.Y("EQUIPE:N", sort="-x", title="Equipe"),
+            tooltip=[
+                "EQUIPE",
+                alt.Tooltip("ANALISES_BASE:Q", title="Análises (só EM)"),
+                alt.Tooltip("REANALISES:Q", title="Reanálises"),
+                alt.Tooltip("ANALISES:Q", title="Análises (EM + RE)"),
+                "APROVACOES",
+                "VENDAS",
+                alt.Tooltip("VGV:Q", title="VGV"),
+                alt.Tooltip(
+                    "TAXA_APROV_ANALISES:Q",
+                    title="% Aprov./Análises (só EM)",
+                    format=".1f",
+                ),
+                alt.Tooltip(
+                    "TAXA_VENDAS_ANALISES:Q",
+                    title="% Vendas/Análises (só EM)",
+                    format=".1f",
+                ),
+                alt.Tooltip(
+                    "TAXA_VENDAS_APROV:Q",
+                    title="% Vendas/Aprovações",
+                    format=".1f",
+                ),
+            ],
         )
-
-    with col_chart_eq:
-        st.markdown("### 💰 VGV por Equipe")
-        chart_eq_vgv = (
-            alt.Chart(rank_eq_funil)
-            .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
-            .encode(
-                x=alt.X("VGV:Q", title="VGV (R$)"),
-                y=alt.Y("EQUIPE:N", sort="-x", title="Equipe"),
-                tooltip=[
-                    "EQUIPE",
-                    alt.Tooltip("ANALISES_BASE:Q", title="Análises (só EM)"),
-                    alt.Tooltip("REANALISES:Q", title="Reanálises"),
-                    alt.Tooltip("ANALISES:Q", title="Análises (EM + RE)"),
-                    "APROVACOES",
-                    "VENDAS",
-                    alt.Tooltip("VGV:Q", title="VGV"),
-                    alt.Tooltip(
-                        "TAXA_APROV_ANALISES:Q",
-                        title="% Aprov./Análises (só EM)",
-                        format=".1f",
-                    ),
-                    alt.Tooltip(
-                        "TAXA_VENDAS_ANALISES:Q",
-                        title="% Vendas/Análises (só EM)",
-                        format=".1f",
-                    ),
-                    alt.Tooltip(
-                        "TAXA_VENDAS_APROV:Q",
-                        title="% Vendas/Aprovações",
-                        format=".1f",
-                    ),
-                ],
-            )
-            .properties(height=400)
-        )
-        st.altair_chart(chart_eq_vgv, use_container_width=True)
+        .properties(height=400)
+    )
+    st.altair_chart(chart_eq_vgv, use_container_width=True)
 
 # ---------------------------------------------------------
 # FUNIL DETALHADO + PLANEJAMENTO POR EQUIPE
@@ -554,8 +548,10 @@ else:
 
         c6, c7, c8 = st.columns(3)
         with c6:
-            st.metric("VGV da equipe",
-                      f"R$ {vgv_eq:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            st.metric(
+                "VGV da equipe",
+                f"R$ {vgv_eq:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            )
         with c7:
             st.metric("Taxa Aprov./Análises (só EM)", f"{taxa_aprov_eq:.1f}%")
         with c8:
