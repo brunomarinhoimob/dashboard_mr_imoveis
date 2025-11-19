@@ -250,43 +250,40 @@ else:
         }
     )
 
-    col_tab_c, col_chart_c = st.columns([2, 3])
+    # 🔽 TABELA EM CIMA, GRÁFICO EMBAIXO
+    st.markdown("### 📋 Tabela do Funil do Corretor (período)")
+    st.dataframe(
+        df_funil_cor.style.format(
+            {"Conversão da etapa anterior (%)": "{:.1f}%".format}
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    with col_tab_c:
-        st.markdown("### 📋 Tabela do Funil do Corretor (período)")
-        st.dataframe(
-            df_funil_cor.style.format(
-                {"Conversão da etapa anterior (%)": "{:.1f}%".format}
+    st.markdown("### 📊 Gráfico do Funil do Corretor (período)")
+    chart_funil_cor = (
+        alt.Chart(df_funil_cor)
+        .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+        .encode(
+            x=alt.X("Quantidade:Q", title="Quantidade"),
+            y=alt.Y(
+                "Etapa:N",
+                sort=["Análises (só EM)", "Aprovações", "Vendas"],
+                title="Etapa",
             ),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    with col_chart_c:
-        st.markdown("### 📊 Gráfico do Funil do Corretor (período)")
-        chart_funil_cor = (
-            alt.Chart(df_funil_cor)
-            .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
-            .encode(
-                x=alt.X("Quantidade:Q", title="Quantidade"),
-                y=alt.Y(
-                    "Etapa:N",
-                    sort=["Análises (só EM)", "Aprovações", "Vendas"],
-                    title="Etapa",
+            tooltip=[
+                "Etapa",
+                "Quantidade",
+                alt.Tooltip(
+                    "Conversão da etapa anterior (%)",
+                    title="Conversão",
+                    format=".1f",
                 ),
-                tooltip=[
-                    "Etapa",
-                    "Quantidade",
-                    alt.Tooltip(
-                        "Conversão da etapa anterior (%)",
-                        title="Conversão",
-                        format=".1f",
-                    ),
-                ],
-            )
-            .properties(height=300)
+            ],
         )
-        st.altair_chart(chart_funil_cor, use_container_width=True)
+        .properties(height=300)
+    )
+    st.altair_chart(chart_funil_cor, use_container_width=True)
 
 # ---------------------------------------------------------
 # PLANEJAMENTO INDIVIDUAL – BASEADO NOS ÚLTIMOS 3 MESES DO CORRETOR
