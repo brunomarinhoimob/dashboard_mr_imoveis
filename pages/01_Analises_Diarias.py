@@ -12,7 +12,19 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("📅 Análises Diárias – Gestão à Vista")
+# ---------------------------------------------------------
+# CABEÇALHO COM TÍTULO + LOGO MR (DENTRO DA PÁGINA)
+# ---------------------------------------------------------
+LOGO_PATH = "logo_mr.png"  # precisa estar na mesma pasta deste arquivo
+
+col_titulo, col_logo = st.columns([3, 1])
+with col_titulo:
+    st.title("📅 Análises Diárias – Gestão à Vista")
+with col_logo:
+    try:
+        st.image(LOGO_PATH, use_container_width=True)
+    except Exception:
+        st.write("")
 
 # Auto-refresh a cada 60 segundos (60000 ms)
 st_autorefresh(interval=60000, key="analises_diarias_refresh")
