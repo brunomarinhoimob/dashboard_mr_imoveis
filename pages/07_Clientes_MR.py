@@ -196,7 +196,7 @@ if df.empty:
     st.stop()
 
 # ---------------------------------------------------------
-# BARRA LATERAL – BUSCA + FILTROS
+# BARRA LATERAL – BUSCA
 # ---------------------------------------------------------
 st.sidebar.title("Busca de clientes 🔎")
 
@@ -206,83 +206,40 @@ tipo_busca = st.sidebar.radio(
 )
 
 termo = st.sidebar.text_input(
-    "Digite o nome ou CPF do cliente (opcional)",
+    "Digite o nome ou CPF do cliente",
     placeholder="Ex: MARIA / 12345678901",
 )
 
 st.sidebar.caption(
     "• Nome: pode digitar só uma parte (ex: 'SILVA')\n"
-    "• CPF: digite só números (não precisa de ponto ou traço)\n"
-    "• Se deixar em branco, traz TODOS os clientes do período/situação."
-)
-
-# ---------- FILTROS: DATA + SITUAÇÃO ----------
-st.sidebar.markdown("---")
-st.sidebar.subheader("Filtros adicionais")
-
-dias_validos = pd.Series(df["DIA"].dropna())
-if not dias_validos.empty:
-    data_min = dias_validos.min()
-    data_max = dias_validos.max()
-else:
-    hoje = date.today()
-    data_min = hoje
-    data_max = hoje
-
-periodo = st.sidebar.date_input(
-    "Período das movimentações",
-    value=(data_min, data_max),
-    min_value=data_min,
-    max_value=data_max,
-)
-
-if isinstance(periodo, tuple):
-    data_ini, data_fim = periodo
-else:
-    data_ini, data_fim = data_min, data_max
-
-lista_situacoes = sorted(df["SITUACAO_ORIGINAL"].dropna().unique())
-situacao_sel = st.sidebar.selectbox(
-    "Situação (opcional)",
-    ["Todas"] + lista_situacoes,
+    "• CPF: digite só números (não precisa de ponto ou traço)"
 )
 
 # ---------------------------------------------------------
-# MONTA BASE PELO PERÍODO + SITUAÇÃO
+# FILTRO POR BUSCA
 # ---------------------------------------------------------
-df_filtrado_base = df[
-    (df["DIA"] >= data_ini) & (df["DIA"] <= data_fim)
-].copy()
+df_resultado = pd.DataFrame()
 
-if situacao_sel != "Todas":
-    df_filtrado_base = df_filtrado_base[
-        df_filtrado_base["SITUACAO_ORIGINAL"].str.contains(situacao_sel, na=False)
-    ]
-
-# ---------------------------------------------------------
-# APLICA BUSCA (NOME/CPF) EM CIMA DESSA BASE
-# ---------------------------------------------------------
 if termo.strip():
     termo_limpo = termo.strip().upper()
 
     if tipo_busca.startswith("Nome"):
-        df_resultado = df_filtrado_base[
-            df_filtrado_base["NOME_CLIENTE_BASE"].str.contains(termo_limpo, na=False)
+        df_resultado = df[
+            df["NOME_CLIENTE_BASE"].str.contains(termo_limpo, na=False)
         ].copy()
     else:
         termo_cpf = "".join(ch for ch in termo if ch.isdigit())
-        df_resultado = df_filtrado_base[
-            df_filtrado_base["CPF_CLIENTE_BASE"].str.contains(termo_cpf, na=False)
+        df_resultado = df[
+            df["CPF_CLIENTE_BASE"].str.contains(termo_cpf, na=False)
         ].copy()
-else:
-    # sem termo → traz TODOS os clientes do período/situação
-    df_resultado = df_filtrado_base.copy()
 
 # ---------------------------------------------------------
 # EXIBIÇÃO DOS RESULTADOS
 # ---------------------------------------------------------
-if df_resultado.empty:
-    st.warning("Nenhum cliente encontrado com esses filtros.")
+if not termo.strip():
+    st.info("Digite um nome ou CPF na lateral para iniciar a busca.")
+elif df_resultado.empty:
+    st.warning("Nenhum cliente encontrado com esse critério de busca.")
 else:
     # Chave única por cliente
     df_resultado["CHAVE_CLIENTE"] = (
@@ -301,7 +258,7 @@ else:
     def conta_vendas(s):
         return s.isin(["VENDA GERADA", "VENDA INFORMADA"]).sum()
 
-    # Resumo por cliente (considerando data + situação já filtradas)
+    # Resumo por cliente
     resumo = (
         df_resultado.groupby("CHAVE_CLIENTE")
         .agg(
@@ -318,11 +275,7 @@ else:
     )
 
     st.markdown(
-        f"### 🔎 Resultado – {len(resumo)} cliente(s) no período/situação selecionados"
-    )
-    st.caption(
-        f"Período: **{data_ini.strftime('%d/%m/%Y')}** até **{data_fim.strftime('%d/%m/%Y')}** "
-        f"• Situação: **{situacao_sel if situacao_sel != 'Todas' else 'Todas'}**"
+        f"### 🔎 Resultado da busca – {len(resumo)} cliente(s) encontrado(s)"
     )
 
     # Tabela geral
@@ -357,7 +310,7 @@ else:
         chave = row["CHAVE_CLIENTE"]
         df_cli = df_resultado[df_resultado["CHAVE_CLIENTE"] == chave].copy()
 
-        # Ordena por data para pegar a última linha (última movimentação) dentro do filtro
+        # Ordena por data para pegar a última linha (última movimentação)
         df_cli = df_cli.sort_values("DIA")
         ultima_linha = df_cli.iloc[-1]
 
@@ -386,13 +339,13 @@ else:
             with col_top1:
                 cpf_fmt = row["CPF"]
                 if cpf_fmt:
-                    st.write(f"**CPF:** `{cpf_fmt}`")
+                    st.write(f"**CPF:** {cpf_fmt}")
                 else:
                     st.write("**CPF:** não informado")
-                st.write(f"**Situação atual:** `{row['ULT_STATUS'] or 'NÃO INFORMADO'}`")
-                st.write(f"**Corretor responsável (última movimentação):** `{ult_corretor}`")
-                st.write(f"**Construtora (última movimentação):** `{ult_constr}`")
-                st.write(f"**Empreendimento (última movimentação):** `{ult_empr}`")
+                st.write(f"**Situação atual:** {row['ULT_STATUS'] or 'NÃO INFORMADO'}")
+                st.write(f"**Corretor responsável (última movimentação):** {ult_corretor}")
+                st.write(f"**Construtora (última movimentação):** {ult_constr}")
+                st.write(f"**Empreendimento (última movimentação):** {ult_empr}")
                 if ultima_obs:
                     st.write(f"**Última observação:** {ultima_obs}")
             with col_top2:
