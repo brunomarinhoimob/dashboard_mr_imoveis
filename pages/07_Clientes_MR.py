@@ -13,19 +13,22 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# LOGO MR IMÓVEIS (coloque logo_mr.png na raiz do app)
+# LOGO MR IMÓVEIS
 # ---------------------------------------------------------
 LOGO_PATH = "logo_mr.png"
-try:
-    st.sidebar.image(LOGO_PATH, use_container_width=True)
-except Exception:
-    st.sidebar.write("MR Imóveis")
 
-st.title("🧑‍💼 Página de Clientes – MR Imóveis")
-st.caption(
-    "Busque clientes pelo nome (parcial) ou CPF e veja o histórico de análises, "
-    "aprovações, vendas, situação atual e a última observação registrada."
-)
+col_tit, col_logo = st.columns([3, 1])
+with col_tit:
+    st.title("🧑‍💼 Página de Clientes – MR Imóveis")
+    st.caption(
+        "Busque clientes pelo nome (parcial) ou CPF e veja o histórico de análises, "
+        "aprovações, vendas, situação atual, corretor responsável e a última observação registrada."
+    )
+with col_logo:
+    try:
+        st.image(LOGO_PATH, use_container_width=True)
+    except Exception:
+        st.write("MR Imóveis")
 
 # ---------------------------------------------------------
 # FUNÇÃO AUXILIAR PARA LIMPAR DATA
@@ -72,6 +75,38 @@ def carregar_dados():
         else:
             df[col] = "NÃO INFORMADO"
 
+    # -------------------------------------------------
+    # CONSTRUTORA / EMPREENDIMENTO (para última mov.)
+    # -------------------------------------------------
+    possiveis_construtora = ["CONSTRUTORA", "INCORPORADORA"]
+    possiveis_empreend = ["EMPREENDIMENTO", "PRODUTO", "IMÓVEL", "IMOVEL"]
+
+    col_construtora = None
+    for c in possiveis_construtora:
+        if c in df.columns:
+            col_construtora = c
+            break
+
+    col_empreend = None
+    for c in possiveis_empreend:
+        if c in df.columns:
+            col_empreend = c
+            break
+
+    if col_construtora is None:
+        df["CONSTRUTORA_BASE"] = "NÃO INFORMADO"
+    else:
+        df["CONSTRUTORA_BASE"] = (
+            df[col_construtora].fillna("NÃO INFORMADO").astype(str).str.upper().str.strip()
+        )
+
+    if col_empreend is None:
+        df["EMPREENDIMENTO_BASE"] = "NÃO INFORMADO"
+    else:
+        df["EMPREENDIMENTO_BASE"] = (
+            df[col_empreend].fillna("NÃO INFORMADO").astype(str).str.upper().str.strip()
+        )
+
     # STATUS BASE + COLUNA ORIGINAL DE SITUAÇÃO
     possiveis_cols_situacao = [
         "SITUAÇÃO",
@@ -96,7 +131,7 @@ def carregar_dados():
         df.loc[status.str.contains("VENDA GERADA"), "STATUS_BASE"] = "VENDA GERADA"
         df.loc[status.str.contains("VENDA INFORMADA"), "STATUS_BASE"] = "VENDA INFORMADA"
 
-        # Situação ORIGINAL – exatamente como na célula
+        # Situação ORIGINAL – exatamente como na célula (só em maiúsculo e sem espaços extras)
         df["SITUACAO_ORIGINAL"] = (
             df[col_situacao].fillna("").astype(str).str.upper().str.strip()
         )
@@ -111,7 +146,6 @@ def carregar_dados():
             .astype(str)
             .str.strip()
         )
-        # VGV numérico (quando for número na observação)
         df["VGV"] = pd.to_numeric(df["OBSERVAÇÕES"], errors="coerce").fillna(0.0)
     else:
         df["OBSERVACOES_RAW"] = ""
@@ -214,9 +248,6 @@ else:
         + df_resultado["CPF_CLIENTE_BASE"].fillna("")
     )
 
-    # Ordena por cliente + data para que o "último" seja o mais recente
-    df_resultado = df_resultado.sort_values(["CHAVE_CLIENTE", "DIA"])
-
     # Funções auxiliares
     def conta_analises(s):
         return s.isin(["EM ANÁLISE", "REANÁLISE"]).sum()
@@ -239,8 +270,6 @@ else:
             VGV=("VGV", "sum"),
             ULT_STATUS=("SITUACAO_ORIGINAL", lambda x: x.iloc[-1] if len(x) > 0 else ""),
             ULT_DATA=("DIA", lambda x: x.max()),
-            # 🔹 Corretor responsável = corretor do último registro do cliente
-            ULT_CORRETOR=("CORRETOR", lambda x: x.iloc[-1] if len(x) > 0 else "NÃO INFORMADO"),
         )
         .reset_index()
     )
@@ -253,17 +282,7 @@ else:
     st.markdown("#### 📋 Visão geral")
     st.dataframe(
         resumo[
-            [
-                "NOME",
-                "CPF",
-                "ULT_CORRETOR",
-                "ULT_STATUS",
-                "ULT_DATA",
-                "ANALISES",
-                "APROVACOES",
-                "VENDAS",
-                "VGV",
-            ]
+            ["NOME", "CPF", "ULT_STATUS", "ULT_DATA", "ANALISES", "APROVACOES", "VENDAS", "VGV"]
         ]
         .sort_values(["VENDAS", "VGV"], ascending=False)
         .style.format({"VGV": "R$ {:,.2f}".format}),
@@ -291,21 +310,31 @@ else:
         chave = row["CHAVE_CLIENTE"]
         df_cli = df_resultado[df_resultado["CHAVE_CLIENTE"] == chave].copy()
 
-        # Ordena por data para pegar a última observação
+        # Ordena por data para pegar a última linha (última movimentação)
         df_cli = df_cli.sort_values("DIA")
+        ultima_linha = df_cli.iloc[-1]
+
+        # Construtora / Empreendimento / Corretor da última movimentação
+        ult_constr = ultima_linha.get("CONSTRUTORA_BASE", "NÃO INFORMADO")
+        ult_empr = ultima_linha.get("EMPREENDIMENTO_BASE", "NÃO INFORMADO")
+        ult_corretor = ultima_linha.get("CORRETOR", "NÃO INFORMADO")
 
         # Pega somente observações não numéricas
         obs_validas = [
-            obs
-            for obs in df_cli["OBSERVACOES_RAW"].fillna("")
+            obs for obs in df_cli["OBSERVACOES_RAW"].fillna("")
             if obs and not observacao_e_numero(obs)
         ]
-
         ultima_obs = obs_validas[-1] if obs_validas else ""
+
+        # Separa análise x reanálise
+        analises_em = (df_cli["STATUS_BASE"] == "EM ANÁLISE").sum()
+        reanalises = (df_cli["STATUS_BASE"] == "REANÁLISE").sum()
+        analises_total = analises_em + reanalises
 
         with st.container():
             st.markdown("---")
             st.markdown(f"##### 👤 {row['NOME']}")
+
             col_top1, col_top2 = st.columns(2)
             with col_top1:
                 cpf_fmt = row["CPF"]
@@ -313,37 +342,34 @@ else:
                     st.write(f"**CPF:** `{cpf_fmt}`")
                 else:
                     st.write("**CPF:** não informado")
-
-                st.write(
-                    f"**Corretor responsável (último registro):** "
-                    f"`{row['ULT_CORRETOR'] or 'NÃO INFORMADO'}`"
-                )
-
-                st.write(
-                    f"**Situação atual:** `{row['ULT_STATUS'] or 'NÃO INFORMADO'}`"
-                )
+                st.write(f"**Situação atual:** `{row['ULT_STATUS'] or 'NÃO INFORMADO'}`")
+                st.write(f"**Corretor responsável (última movimentação):** `{ult_corretor}`")
+                st.write(f"**Construtora (última movimentação):** `{ult_constr}`")
+                st.write(f"**Empreendimento (última movimentação):** `{ult_empr}`")
                 if ultima_obs:
                     st.write(f"**Última observação:** {ultima_obs}")
             with col_top2:
                 if pd.notna(row["ULT_DATA"]):
-                    st.write(
-                        f"**Última movimentação:** "
-                        f"{row['ULT_DATA'].strftime('%d/%m/%Y')}"
-                    )
+                    st.write(f"**Última movimentação:** {row['ULT_DATA'].strftime('%d/%m/%Y')}")
                 else:
                     st.write("**Última movimentação:** não informada")
 
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.metric("Análises (EM + RE)", int(row["ANALISES"]))
-            with c2:
+            # Métricas separando análise / reanálise
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.metric("Análises (só EM)", int(analises_em))
+            with m2:
+                st.metric("Reanálises", int(reanalises))
+            with m3:
+                st.metric("Análises (EM + RE)", int(analises_total))
+
+            m4, m5, m6 = st.columns(3)
+            with m4:
                 st.metric("Aprovações", int(row["APROVACOES"]))
-            with c3:
+            with m5:
                 st.metric("Vendas", int(row["VENDAS"]))
-            with c4:
+            with m6:
                 st.metric(
                     "VGV total",
-                    f"R$ {row['VGV']:,.2f}".replace(",", "X")
-                    .replace(".", ",")
-                    .replace("X", "."),
+                    f"R$ {row['VGV']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                 )
