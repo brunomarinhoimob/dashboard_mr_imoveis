@@ -216,6 +216,10 @@ def carregar_leads(limit: int = 1000, max_pages: int = 20) -> pd.DataFrame:
 
 df_leads = carregar_leads()
 
+# 🔁 Guarda no session_state para outras páginas reaproveitarem sem chamar API de novo
+if "df_leads" not in st.session_state:
+    st.session_state["df_leads"] = df_leads
+
 # ---------------------------------------------------------
 # SIDEBAR - FILTROS
 # ---------------------------------------------------------
