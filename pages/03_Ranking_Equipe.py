@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
-from datetime import date
+from datetime import date, timedelta
 
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DA PÁGINA
@@ -43,7 +43,7 @@ def carregar_dados():
 
     df.columns = [c.strip().upper() for c in df.columns]
 
-    # DATA / DIA
+    # DATA
     if "DATA" in df.columns:
         df["DIA"] = limpar_para_data(df["DATA"])
     elif "DIA" in df.columns:
@@ -64,20 +64,13 @@ def carregar_dados():
         else:
             df[col] = "NÃO INFORMADO"
 
-    # SITUAÇÃO BASE
-    possiveis_cols_situacao = [
-        "SITUAÇÃO", "SITUAÇÃO ATUAL", "STATUS",
-        "SITUACAO", "SITUACAO ATUAL"
-    ]
-    col_situacao = None
-    for c in possiveis_cols_situacao:
-        if c in df.columns:
-            col_situacao = c
-            break
+    # STATUS
+    possiveis_cols_situacao = ["SITUAÇÃO", "SITUAÇÃO ATUAL", "STATUS", "SITUACAO", "SITUACAO ATUAL"]
+    col_situacao = next((c for c in possiveis_cols_situacao if c in df.columns), None)
 
     df["STATUS_BASE"] = ""
     if col_situacao:
-        status = df[col_situacao].fillna("").astype(str).str.upper()
+        status = df[col_situacao].fillna("").str.upper()
         df.loc[status.str.contains("EM ANÁLISE"), "STATUS_BASE"] = "EM ANÁLISE"
         df.loc[status.str.contains("REANÁLISE"), "STATUS_BASE"] = "REANÁLISE"
         df.loc[status.str.contains("APROV"), "STATUS_BASE"] = "APROVADO"
@@ -97,74 +90,70 @@ def carregar_dados():
 df = carregar_dados()
 
 if df.empty:
-    st.error("Não foi possível carregar dados da planilha. Verifique o link.")
+    st.error("Não foi possível carregar dados.")
     st.stop()
 
 # ---------------------------------------------------------
-# FILTRO DE PERÍODO (COM SESSION_STATE)
+# FILTRO DE PERÍODO (ULTIMOS 30 DIAS EDITÁVEIS)
 # ---------------------------------------------------------
+
 st.sidebar.title("Filtros 🔎")
 
 dias_validos = pd.Series(df["DIA"].dropna())
 
-if not dias_validos.empty:
+if dias_validos.empty:
+    data_min = data_max = date.today()
+else:
     data_min = dias_validos.min()
     data_max = dias_validos.max()
-else:
-    hoje = date.today()
-    data_min = hoje
-    data_max = hoje
 
-# guarda o período no session_state para não perder ao trocar de página
+# Padrão = últimos 30 dias
+default_ini = data_max - timedelta(days=30)
+if default_ini < data_min:
+    default_ini = data_min
+
 if "rank_eq_periodo" not in st.session_state:
-    st.session_state["rank_eq_periodo"] = (data_min, data_max)
+    st.session_state["rank_eq_periodo"] = (default_ini, data_max)
 
 periodo = st.sidebar.date_input(
-    "Período",
+    "Período (padrão: últimos 30 dias)",
     value=st.session_state["rank_eq_periodo"],
     min_value=data_min,
     max_value=data_max,
 )
 
-if isinstance(periodo, tuple):
+# Validação
+if isinstance(periodo, (tuple, list)) and len(periodo) == 2:
     data_ini, data_fim = periodo
-    st.session_state["rank_eq_periodo"] = (data_ini, data_fim)
 else:
-    data_ini, data_fim = data_min, data_max
-    st.session_state["rank_eq_periodo"] = (data_ini, data_fim)
+    data_ini, data_fim = default_ini, data_max
+
+st.session_state["rank_eq_periodo"] = (data_ini, data_fim)
 
 # ---------------------------------------------------------
 # APLICA FILTRO DE DATA
 # ---------------------------------------------------------
-df_periodo = df.copy()
-dia_series_all = limpar_para_data(df_periodo["DIA"])
-mask_data_all = (dia_series_all >= data_ini) & (dia_series_all <= data_fim)
-df_periodo = df_periodo[mask_data_all]
+df_periodo = df[
+    (df["DIA"] >= data_ini) & (df["DIA"] <= data_fim)
+]
 
 registros_filtrados = len(df_periodo)
 
 st.caption(
-    f"Período filtrado: **{data_ini.strftime('%d/%m/%Y')}** até "
+    f"Período filtrado: **{data_ini.strftime('%d/%m/%Y')}** → "
     f"**{data_fim.strftime('%d/%m/%Y')}** • Registros: **{registros_filtrados}**"
 )
 
 if df_periodo.empty:
-    st.warning("Nenhum registro encontrado para o período filtrado.")
+    st.warning("Nenhum registro neste período.")
     st.stop()
 
 # ---------------------------------------------------------
 # AGRUPAMENTO POR EQUIPE
 # ---------------------------------------------------------
-st.markdown("### 📊 Resumo geral por equipe")
-
-def conta_analises(s):
-    return s.isin(["EM ANÁLISE", "REANÁLISE"]).sum()
-
-def conta_vendas(s):
-    return s.isin(["VENDA GERADA", "VENDA INFORMADA"]).sum()
-
-def conta_aprovacoes(s):
-    return (s == "APROVADO").sum()
+def conta_analises(s): return s.isin(["EM ANÁLISE", "REANÁLISE"]).sum()
+def conta_vendas(s): return s.isin(["VENDA GERADA", "VENDA INFORMADA"]).sum()
+def conta_aprovacoes(s): return (s == "APROVADO").sum()
 
 rank_eq = (
     df_periodo.groupby("EQUIPE")
@@ -177,6 +166,7 @@ rank_eq = (
     .reset_index()
 )
 
+# Remove equipes zeradas
 rank_eq = rank_eq[
     (rank_eq["ANALISES"] > 0)
     | (rank_eq["APROVACOES"] > 0)
@@ -185,10 +175,10 @@ rank_eq = rank_eq[
 ]
 
 if rank_eq.empty:
-    st.info("Nenhuma equipe com movimentação nesse período.")
+    st.info("Nenhuma equipe teve movimentação neste período.")
     st.stop()
 
-# Taxas de conversão por equipe
+# Taxas
 rank_eq["TAXA_APROV_ANALISES"] = np.where(
     rank_eq["ANALISES"] > 0,
     rank_eq["APROVACOES"] / rank_eq["ANALISES"] * 100,
@@ -201,54 +191,85 @@ rank_eq["TAXA_VENDAS_ANALISES"] = np.where(
     0
 )
 
-# Ordena
-rank_eq = rank_eq.sort_values(["VENDAS", "VGV"], ascending=False)
+# Ordenação
+rank_eq = rank_eq.sort_values(["VENDAS", "VGV"], ascending=False).reset_index(drop=True)
 
 # ---------------------------------------------------------
-# LINHA TOTAL IMOBILIÁRIA (SOMATÓRIO)
+# ESTILO VISUAL DA TABELA
 # ---------------------------------------------------------
-tot_analises = rank_eq["ANALISES"].sum()
-tot_aprov = rank_eq["APROVACOES"].sum()
-tot_vendas = rank_eq["VENDAS"].sum()
-tot_vgv = rank_eq["VGV"].sum()
 
-tot_taxa_aprov = (tot_aprov / tot_analises * 100) if tot_analises > 0 else 0
-tot_taxa_vendas = (tot_vendas / tot_analises * 100) if tot_analises > 0 else 0
+st.markdown("### 📋 Tabela de Ranking das Equipes")
 
-total_row = pd.DataFrame(
-    {
-        "EQUIPE": ["TOTAL IMOBILIÁRIA"],
-        "ANALISES": [tot_analises],
-        "APROVACOES": [tot_aprov],
-        "VENDAS": [tot_vendas],
-        "VGV": [tot_vgv],
-        "TAXA_APROV_ANALISES": [tot_taxa_aprov],
-        "TAXA_VENDAS_ANALISES": [tot_taxa_vendas],
-    }
-)
+def zebra(row):
+    cor = "#0b1120" if row.name % 2 else "#020617"
+    return [f"background-color: {cor}"] * len(row)
 
-# DataFrame só para a TABELA (inclui total)
+def highlight_top3(row):
+    if row.name == 0:
+        return ["background-color: rgba(250, 204, 21, .25); font-weight:bold;"] * len(row)
+    if row.name == 1:
+        return ["background-color: rgba(148, 163, 184, .15); font-weight:bold;"] * len(row)
+    if row.name == 2:
+        return ["background-color: rgba(248, 250, 252, .08); font-weight:bold;"] * len(row)
+    return [""] * len(row)
+
+# Linha TOTAL imobiliária
+total_row = pd.DataFrame({
+    "EQUIPE": ["TOTAL IMOBILIÁRIA"],
+    "ANALISES": [rank_eq["ANALISES"].sum()],
+    "APROVACOES": [rank_eq["APROVACOES"].sum()],
+    "VENDAS": [rank_eq["VENDAS"].sum()],
+    "VGV": [rank_eq["VGV"].sum()],
+    "TAXA_APROV_ANALISES": [
+        (rank_eq["APROVACOES"].sum() / rank_eq["ANALISES"].sum() * 100)
+        if rank_eq["ANALISES"].sum() > 0 else 0
+    ],
+    "TAXA_VENDAS_ANALISES": [
+        (rank_eq["VENDAS"].sum() / rank_eq["ANALISES"].sum() * 100)
+        if rank_eq["ANALISES"].sum() > 0 else 0
+    ],
+})
+
 rank_eq_table = pd.concat([rank_eq, total_row], ignore_index=True)
 
-# ---------------------------------------------------------
-# EXIBIÇÃO — TABELA EM CIMA, GRÁFICO EMBAIXO
-# ---------------------------------------------------------
-st.markdown("#### 📋 Tabela detalhada do ranking por equipe")
-st.dataframe(
-    rank_eq_table.style.format(
-        {
-            "VGV": "R$ {:,.2f}".format,
-            "TAXA_APROV_ANALISES": "{:.1f}%".format,
-            "TAXA_VENDAS_ANALISES": "{:.1f}%".format,
-        }
-    ),
-    use_container_width=True,
-    hide_index=True,
+styles = [
+    {"selector": "th", "props": [
+        ("background-color", "#0f172a"),
+        ("color", "#e5e7eb"),
+        ("padding", "6px"),
+        ("text-align", "center"),
+        ("font-weight", "bold")
+    ]},
+    {"selector": "tbody td", "props": [
+        ("padding", "6px"),
+        ("border", "0px"),
+        ("font-size", "0.9rem")
+    ]},
+]
+
+styled = (
+    rank_eq_table
+    .style
+    .format({
+        "VGV": "R$ {:,.2f}".format,
+        "TAXA_APROV_ANALISES": "{:.1f}%".format,
+        "TAXA_VENDAS_ANALISES": "{:.1f}%".format,
+    })
+    .set_table_styles(styles)
+    .apply(zebra, axis=1)
+    .apply(highlight_top3, axis=1)
 )
 
-st.markdown("#### 💰 VGV por equipe (período filtrado)")
-chart_vgv_eq = (
-    alt.Chart(rank_eq)  # aqui NÃO vai a linha TOTAL
+st.dataframe(styled, use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------
+# GRÁFICO
+# ---------------------------------------------------------
+
+st.markdown("### 💰 VGV por equipe")
+
+chart = (
+    alt.Chart(rank_eq)
     .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
     .encode(
         x=alt.X("VGV:Q", title="VGV (R$)"),
@@ -259,18 +280,16 @@ chart_vgv_eq = (
             "APROVACOES",
             "VENDAS",
             alt.Tooltip("VGV:Q", title="VGV"),
-            alt.Tooltip("TAXA_APROV_ANALISES:Q", title="% Aprov./Análises", format=".1f"),
-            alt.Tooltip("TAXA_VENDAS_ANALISES:Q", title="% Vendas/Análises", format=".1f"),
-        ],
+            alt.Tooltip("TAXA_APROV_ANALISES:Q", title="% Aprov.", format=".1f"),
+            alt.Tooltip("TAXA_VENDAS_ANALISES:Q", title="% Vendas", format=".1f"),
+        ]
     )
-    .properties(height=500)
+    .properties(height=450)
 )
-st.altair_chart(chart_vgv_eq, use_container_width=True)
+
+st.altair_chart(chart, use_container_width=True)
 
 st.markdown(
-    "<hr style='border-color:#1f2937'>"
-    "<p style='text-align:center; color:#6b7280;'>"
-    "Ranking por equipe baseado em análises, aprovações, vendas e VGV."
-    "</p>",
-    unsafe_allow_html=True,
+    "<hr><p style='text-align:center;color:#6b7280;'>Ranking por equipe baseado em análises, aprovações, vendas e VGV.</p>",
+    unsafe_allow_html=True
 )
