@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DA PÁGINA
@@ -109,31 +109,38 @@ if df.empty:
 st.sidebar.title("Filtros 🔎")
 
 dias_validos = pd.Series(df["DIA"].dropna())
+
 if not dias_validos.empty:
     data_max = dias_validos.max()
+    data_min = dias_validos.min()
 else:
     data_max = date.today()
+    data_min = data_max - timedelta(days=365)
 
-# Período padrão = mês atual
-primeiro_dia_mes = date(date.today().year, date.today().month, 1)
-ultimo_dia = date.today()
+# Período padrão = últimos 30 dias com base na maior data da base
+default_ini = data_max - timedelta(days=30)
+if default_ini < data_min:
+    default_ini = data_min
 
 if "periodo_filtro" not in st.session_state:
-    st.session_state["periodo_filtro"] = (primeiro_dia_mes, ultimo_dia)
+    st.session_state["periodo_filtro"] = (default_ini, data_max)
 
 periodo = st.sidebar.date_input(
-    "Período (padrão = mês atual)",
+    "Período (padrão = últimos 30 dias)",
     value=st.session_state["periodo_filtro"],
-    min_value=primeiro_dia_mes,
-    max_value=ultimo_dia,
+    min_value=data_min,
+    max_value=data_max,
 )
 
 st.session_state["periodo_filtro"] = periodo
 
-if isinstance(periodo, tuple):
-    data_ini, data_fim = periodo
+if isinstance(periodo, tuple) or isinstance(periodo, list):
+    if len(periodo) == 2:
+        data_ini, data_fim = periodo
+    else:
+        data_ini, data_fim = default_ini, data_max
 else:
-    data_ini, data_fim = primeiro_dia_mes, ultimo_dia
+    data_ini, data_fim = default_ini, data_max
 
 # Filtro de equipe
 lista_equipes = sorted(df["EQUIPE"].dropna().unique())
