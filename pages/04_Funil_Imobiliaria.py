@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
-from datetime import date
+from datetime import date, timedelta  # <-- acrescentei timedelta
 
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DA PÁGINA
@@ -122,12 +122,15 @@ if not dias_validos.empty:
     data_max = dias_validos.max()
 else:
     hoje = date.today()
-    data_min = hoje
+    data_min = hoje - timedelta(days=30)
     data_max = hoje
+
+# 🔹 Janela padrão: últimos 30 dias até a última data da base
+data_ini_default = max(data_min, data_max - timedelta(days=30))
 
 periodo = st.sidebar.date_input(
     "Período",
-    value=(data_min, data_max),
+    value=(data_ini_default, data_max),
     min_value=data_min,
     max_value=data_max,
 )
@@ -135,7 +138,7 @@ periodo = st.sidebar.date_input(
 if isinstance(periodo, tuple):
     data_ini, data_fim = periodo
 else:
-    data_ini, data_fim = data_min, data_max
+    data_ini, data_fim = data_ini_default, data_max
 
 # Filtro opcional por equipe (para funil detalhado)
 lista_equipes = sorted(df["EQUIPE"].dropna().unique())
@@ -227,9 +230,9 @@ taxa_venda_aprov = (
 )
 
 # Cards principais – agora com LEADS (CRM)
-col_leads, col1, col2, col3, col4, col5 = st.columns(6)
+col_leads_card, col1, col2, col3, col4, col5 = st.columns(6)
 
-with col_leads:
+with col_leads_card:
     if total_leads_periodo is None:
         st.metric("Leads (CRM)", "-")
     else:
