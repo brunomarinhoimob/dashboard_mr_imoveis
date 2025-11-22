@@ -7,20 +7,16 @@ import requests
 
 from utils.supremo_config import TOKEN_SUPREMO
 
-# ---------------------------------------------------------
-# CONFIGURAÇÃO DO CACHE
-# ---------------------------------------------------------
 BASE_URL_LEADS = "https://api.supremocrm.com.br/v1/leads"
 
 CACHE_DIR = "cache"
 CACHE_FILE = os.path.join(CACHE_DIR, "leads_cache.pkl")
-CACHE_TTL_MINUTES = 30  # tempo de vida do cache em minutos
+CACHE_TTL_MINUTES = 30
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 
 def _ler_cache():
-    """Lê o cache do disco. Retorna (df, timestamp) ou (None, None)."""
     if not os.path.exists(CACHE_FILE):
         return None, None
 
@@ -33,7 +29,6 @@ def _ler_cache():
 
 
 def _salvar_cache(df):
-    """Salva o cache SEM nunca quebrar o app."""
     try:
         payload = {"df": df, "timestamp": datetime.now()}
         with open(CACHE_FILE, "wb") as f:
@@ -43,12 +38,11 @@ def _salvar_cache(df):
 
 
 def _get_api_page(pagina):
-    """Busca uma página da API. Se falhar, retorna DF vazio (sem mostrar erro na tela)."""
     headers = {"Authorization": f"Bearer {TOKEN_SUPREMO}"}
     params = {"pagina": pagina}
 
     try:
-        r = requests.get(BASE_URL_LEADS, headers=headers, params=params, timeout=30)
+        r = requests.get(BASE_URL_LEADS, headers=headers, params=params, timeout=15)
         if r.status_code != 200:
             return pd.DataFrame()
         data = r.json()
@@ -65,22 +59,14 @@ def _get_api_page(pagina):
 
 
 def carregar_leads(limit=1000, max_pages=100):
-    """
-    Lógica segura:
-    1. Lê cache.
-    2. Se tiver cache recente → usa.
-    3. Se a API funcionar → atualiza cache.
-    4. Se a API falhar → usa o cache antigo SEMPRE.
-    """
-
     df_cache, ts_cache = _ler_cache()
 
-    # 1 — se tem cache e está dentro do TTL → usa ele (NÃO chama API)
+    # 1. Se o cache existe e está DENTRO do TTL → usa imediatamente
     if df_cache is not None and ts_cache is not None:
         if datetime.now() - ts_cache < timedelta(minutes=CACHE_TTL_MINUTES):
             return df_cache
 
-    # 2 — tenta atualizar via API
+    # 2. Tenta atualizar da API
     dfs = []
     total = 0
     pagina = 1
@@ -93,14 +79,14 @@ def carregar_leads(limit=1000, max_pages=100):
         total += len(df_page)
         pagina += 1
 
-    # 3 — se API NÃO respondeu → usa cache antigo (mesmo expirado!)
+    # 3. SE A API FALHAR OU VIER VAZIA → USA O CACHE ANTIGO (mesmo expirado)
     if not dfs:
         if df_cache is not None:
-            return df_cache
+            return df_cache  # <-- nunca mais os leads somem
         else:
-            return pd.DataFrame()  # realmente não temos nada ainda
+            return pd.DataFrame()  # primeira execução sem cache
 
-    # 4 — API respondeu, então atualiza o cache
+    # 4. API deu certo → constrói o DF novo
     df_all = pd.concat(dfs, ignore_index=True)
 
     if "id" in df_all.columns:
@@ -111,15 +97,8 @@ def carregar_leads(limit=1000, max_pages=100):
 
     df_all = df_all.head(limit)
 
-    _salvar_cache(df_all)
+    # 5. SALVA no cache apenas se a API trouxe dados
+    if not df_all.empty:
+        _salvar_cache(df_all)
 
     return df_all
-
-
-def obter_timestamp_cache():
-    """
-    Retorna apenas o timestamp do cache (ou None).
-    Serve para mostrar no dashboard quando os leads foram atualizados pela última vez.
-    """
-    _, ts_cache = _ler_cache()
-    return ts_cache
