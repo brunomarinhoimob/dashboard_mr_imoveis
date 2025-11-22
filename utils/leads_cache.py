@@ -7,7 +7,6 @@ import requests
 
 from utils.supremo_config import TOKEN_SUPREMO
 
-
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DO CACHE
 # ---------------------------------------------------------
@@ -44,7 +43,7 @@ def _salvar_cache(df):
 
 
 def _get_api_page(pagina):
-    """Busca uma página da API. Se falhar, retorna DF vazio."""
+    """Busca uma página da API. Se falhar, retorna DF vazio (sem mostrar erro na tela)."""
     headers = {"Authorization": f"Bearer {TOKEN_SUPREMO}"}
     params = {"pagina": pagina}
 
@@ -76,7 +75,7 @@ def carregar_leads(limit=1000, max_pages=100):
 
     df_cache, ts_cache = _ler_cache()
 
-    # 1 — se tem cache e está dentro do TTL → usa ele
+    # 1 — se tem cache e está dentro do TTL → usa ele (NÃO chama API)
     if df_cache is not None and ts_cache is not None:
         if datetime.now() - ts_cache < timedelta(minutes=CACHE_TTL_MINUTES):
             return df_cache
@@ -99,7 +98,7 @@ def carregar_leads(limit=1000, max_pages=100):
         if df_cache is not None:
             return df_cache
         else:
-            return pd.DataFrame()  # realmente não temos nada
+            return pd.DataFrame()  # realmente não temos nada ainda
 
     # 4 — API respondeu, então atualiza o cache
     df_all = pd.concat(dfs, ignore_index=True)
@@ -115,3 +114,12 @@ def carregar_leads(limit=1000, max_pages=100):
     _salvar_cache(df_all)
 
     return df_all
+
+
+def obter_timestamp_cache():
+    """
+    Retorna apenas o timestamp do cache (ou None).
+    Serve para mostrar no dashboard quando os leads foram atualizados pela última vez.
+    """
+    _, ts_cache = _ler_cache()
+    return ts_cache

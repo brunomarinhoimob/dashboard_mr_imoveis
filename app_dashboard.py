@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-from datetime import date, timedelta
+from datetime import timedelta
 
-from utils.supremo_config import TOKEN_SUPREMO  # mantido se você usar em outros pontos
-from utils.leads_cache import carregar_leads    # 🔥 novo módulo de cache
+from utils.leads_cache import carregar_leads, obter_timestamp_cache
+
+# (se você usar TOKEN_SUPREMO em outro lugar, mantém aqui)
+# from utils.supremo_config import TOKEN_SUPREMO
 
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DA PÁGINA
@@ -68,7 +69,6 @@ def limpar_para_data(serie: pd.Series) -> pd.Series:
 
 @st.cache_data(ttl=60)
 def carregar_dados_planilha() -> pd.DataFrame:
-    """Carrega base de análises/vendas do Google Sheets e normaliza colunas."""
     df = pd.read_csv(CSV_URL)
     df.columns = [c.strip().upper() for c in df.columns]
 
@@ -110,13 +110,13 @@ def carregar_dados_planilha() -> pd.DataFrame:
         df.loc[s.str.contains("VENDA GERADA"), "STATUS_BASE"] = "VENDA GERADA"
         df.loc[s.str.contains("VENDA INFORMADA"), "STATUS_BASE"] = "VENDA INFORMADA"
 
-    # VGV (OBSERVAÇÕES)
+    # VGV
     if "OBSERVAÇÕES" in df.columns:
         df["VGV"] = pd.to_numeric(df["OBSERVAÇÕES"], errors="coerce").fillna(0)
     else:
         df["VGV"] = 0
 
-    # NOME / CPF BASE – chave do cliente
+    # NOME / CPF BASE
     possiveis_nome = ["NOME", "CLIENTE", "NOME CLIENTE", "NOME DO CLIENTE"]
     possiveis_cpf = ["CPF", "CPF CLIENTE", "CPF DO CLIENTE"]
 
@@ -154,9 +154,10 @@ if df.empty:
     st.stop()
 
 # ---------------------------------------------------------
-# LEADS – USANDO MÓDULO DE CACHE
+# LEADS – USANDO CACHE CENTRAL
 # ---------------------------------------------------------
-df_leads = carregar_leads()  # 🔥 aqui usa o cache .pkl de 30min
+df_leads = carregar_leads()
+ts_cache = obter_timestamp_cache()
 
 if "df_leads" not in st.session_state:
     st.session_state["df_leads"] = df_leads
@@ -193,7 +194,7 @@ lista_corretor = sorted(base_cor["CORRETOR"].unique())
 corretor_sel = st.sidebar.selectbox("Corretor", ["Todos"] + lista_corretor)
 
 # ---------------------------------------------------------
-# FILTRO PRINCIPAL DA BASE
+# FILTRO PRINCIPAL
 # ---------------------------------------------------------
 df_filtrado = df[
     (df["DIA"] >= data_ini) &
@@ -217,8 +218,14 @@ st.caption(
     f"Registros filtrados: {registros_filtrados}"
 )
 
+# Mostra hora da última atualização dos leads (pra você ver que não é 1 em 1 min)
+if ts_cache is not None:
+    st.caption(f"🕒 Última atualização dos leads (Supremo): {ts_cache.strftime('%d/%m/%Y %H:%M:%S')}")
+else:
+    st.caption("🕒 Leads ainda não carregados do cache.")
+
 # ---------------------------------------------------------
-# CÁLCULOS PRINCIPAIS (ANÁLISES / APROVAÇÕES / REPROVAÇÕES)
+# CÁLCULOS PRINCIPAIS
 # ---------------------------------------------------------
 em_analise = (df_filtrado["STATUS_BASE"] == "EM ANÁLISE").sum()
 reanalise = (df_filtrado["STATUS_BASE"] == "REANÁLISE").sum()
@@ -227,22 +234,18 @@ reprovacoes = (df_filtrado["STATUS_BASE"] == "REPROVADO").sum()
 
 analises_total = em_analise + reanalise
 
-# ---------------------------------------------------------
-# VENDAS – UMA VENDA POR CLIENTE (ÚLTIMO STATUS)
-# ---------------------------------------------------------
+# VENDAS – status final por cliente
 df_vendas_ref = df_filtrado[
     df_filtrado["STATUS_BASE"].isin(["VENDA GERADA", "VENDA INFORMADA"])
 ].copy()
 
 if not df_vendas_ref.empty:
-    # chave cliente
     df_vendas_ref["CHAVE_CLIENTE"] = (
         df_vendas_ref["NOME_CLIENTE_BASE"].fillna("NÃO INFORMADO")
         + " | "
         + df_vendas_ref["CPF_CLIENTE_BASE"].fillna("")
     )
 
-    # ordena por data e pega só a ÚLTIMA linha de cada cliente (status final)
     df_vendas_ref = df_vendas_ref.sort_values("DIA")
     df_vendas_ult = df_vendas_ref.groupby("CHAVE_CLIENTE").tail(1)
 
@@ -250,7 +253,6 @@ if not df_vendas_ref.empty:
     venda_informada = (df_vendas_ult["STATUS_BASE"] == "VENDA INFORMADA").sum()
     vendas_total = int(venda_gerada + venda_informada)
 
-    # VGV apenas das vendas finais de cada cliente
     vgv_total = df_vendas_ult["VGV"].sum()
     maior_vgv = df_vendas_ult["VGV"].max() if vendas_total > 0 else 0
 else:
@@ -267,7 +269,7 @@ taxa_venda_analise = (vendas_total / analises_total * 100) if analises_total els
 taxa_venda_aprov = (vendas_total / aprovacoes * 100) if aprovacoes else 0
 
 # ---------------------------------------------------------
-# CARDS – ANÁLISES & VENDAS
+# CARDS
 # ---------------------------------------------------------
 st.subheader("Resumo de Análises & Vendas")
 
@@ -288,7 +290,7 @@ c9.metric("Vendas/Análises", f"{taxa_venda_analise:.1f}%")
 c10.metric("Vendas/Aprovações", f"{taxa_venda_aprov:.1f}%")
 
 # ---------------------------------------------------------
-# LEADS – RESUMO DO SUPREMO
+# LEADS – RESUMO
 # ---------------------------------------------------------
 st.markdown("---")
 st.subheader("📈 Resumo de Leads (Supremo CRM)")
