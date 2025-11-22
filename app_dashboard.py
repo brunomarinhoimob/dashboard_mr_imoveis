@@ -61,15 +61,18 @@ SHEET_ID = "1Ir_fPugLsfHNk6iH0XPCA6xM92bq8tTrn7UnunGRwCw"
 GID_ANALISES = "1574157905"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_ANALISES}"
 
+
 def limpar_para_data(serie):
     dt = pd.to_datetime(serie, dayfirst=True, errors="coerce")
     return dt.dt.date
+
 
 @st.cache_data(ttl=60)
 def carregar_dados():
     df = pd.read_csv(CSV_URL)
     df.columns = [c.strip().upper() for c in df.columns]
 
+    # DATA / DIA
     if "DATA" in df.columns:
         df["DIA"] = limpar_para_data(df["DATA"])
     elif "DIA" in df.columns:
@@ -77,12 +80,20 @@ def carregar_dados():
     else:
         df["DIA"] = pd.NaT
 
+    # EQUIPE / CORRETOR
     for col in ["EQUIPE", "CORRETOR"]:
         if col in df.columns:
-            df[col] = df[col].fillna("NÃO INFORMADO").astype(str).str.upper().str.strip()
+            df[col] = (
+                df[col]
+                .fillna("NÃO INFORMADO")
+                .astype(str)
+                .str.upper()
+                .str.strip()
+            )
         else:
             df[col] = "NÃO INFORMADO"
 
+    # STATUS BASE
     possiveis_cols_situacao = [
         "SITUAÇÃO", "SITUAÇÃO ATUAL", "STATUS",
         "SITUACAO", "SITUACAO ATUAL"
@@ -99,10 +110,50 @@ def carregar_dados():
         df.loc[s.str.contains("VENDA GERADA"), "STATUS_BASE"] = "VENDA GERADA"
         df.loc[s.str.contains("VENDA INFORMADA"), "STATUS_BASE"] = "VENDA INFORMADA"
 
+    # VGV (OBSERVAÇÕES)
     if "OBSERVAÇÕES" in df.columns:
         df["VGV"] = pd.to_numeric(df["OBSERVAÇÕES"], errors="coerce").fillna(0)
     else:
         df["VGV"] = 0
+
+    # -----------------------------------------------------
+    # NOME / CPF BASE – para chave de cliente
+    # -----------------------------------------------------
+    possiveis_nome = ["NOME", "CLIENTE", "NOME CLIENTE", "NOME DO CLIENTE"]
+    possiveis_cpf = ["CPF", "CPF CLIENTE", "CPF DO CLIENTE"]
+
+    col_nome = None
+    for c in possiveis_nome:
+        if c in df.columns:
+            col_nome = c
+            break
+
+    col_cpf = None
+    for c in possiveis_cpf:
+        if c in df.columns:
+            col_cpf = c
+            break
+
+    if col_nome is None:
+        df["NOME_CLIENTE_BASE"] = "NÃO INFORMADO"
+    else:
+        df["NOME_CLIENTE_BASE"] = (
+            df[col_nome]
+            .fillna("NÃO INFORMADO")
+            .astype(str)
+            .str.upper()
+            .str.strip()
+        )
+
+    if col_cpf is None:
+        df["CPF_CLIENTE_BASE"] = ""
+    else:
+        df["CPF_CLIENTE_BASE"] = (
+            df[col_cpf]
+            .fillna("")
+            .astype(str)
+            .str.replace(r"\D", "", regex=True)
+        )
 
     return df
 
@@ -117,6 +168,7 @@ if df.empty:
 # API LEADS – SUPREMO
 # ---------------------------------------------------------
 BASE_URL_LEADS = "https://api.supremocrm.com.br/v1/leads"
+
 
 def get_leads_page(pagina=1):
     headers = {"Authorization": f"Bearer {TOKEN_SUPREMO}"}
@@ -133,7 +185,7 @@ def get_leads_page(pagina=1):
 
     try:
         data = resp.json()
-    except:
+    except Exception:
         return pd.DataFrame()
 
     if isinstance(data, dict) and "data" in data:
@@ -143,6 +195,7 @@ def get_leads_page(pagina=1):
         return pd.DataFrame(data)
 
     return pd.DataFrame()
+
 
 @st.cache_data(ttl=60)
 def carregar_leads(limit=1000, max_pages=100):
@@ -216,7 +269,7 @@ corretor_sel = st.sidebar.selectbox("Corretor", ["Todos"] + lista_corretor)
 df_filtrado = df[
     (df["DIA"] >= data_ini) &
     (df["DIA"] <= data_fim)
-]
+].copy()
 
 if equipe_sel != "Todas":
     df_filtrado = df_filtrado[df_filtrado["EQUIPE"] == equipe_sel]
@@ -236,20 +289,48 @@ st.caption(
 )
 
 # ---------------------------------------------------------
-# CÁLCULOS PRINCIPAIS
+# CÁLCULOS PRINCIPAIS (ANÁLISES / APROVAÇÕES / REPROVAÇÕES)
 # ---------------------------------------------------------
 em_analise = (df_filtrado["STATUS_BASE"] == "EM ANÁLISE").sum()
 reanalise = (df_filtrado["STATUS_BASE"] == "REANÁLISE").sum()
 aprovacoes = (df_filtrado["STATUS_BASE"] == "APROVADO").sum()
 reprovacoes = (df_filtrado["STATUS_BASE"] == "REPROVADO").sum()
-venda_gerada = (df_filtrado["STATUS_BASE"] == "VENDA GERADA").sum()
-venda_informada = (df_filtrado["STATUS_BASE"] == "VENDA INFORMADA").sum()
 
 analises_total = em_analise + reanalise
-vendas_total = venda_gerada + venda_informada
 
-vgv_total = df_filtrado["VGV"].sum()
-maior_vgv = df_filtrado["VGV"].max() if registros_filtrados > 0 else 0
+# ---------------------------------------------------------
+# VENDAS – UMA VENDA POR CLIENTE (ÚLTIMO STATUS)
+# ---------------------------------------------------------
+df_vendas_ref = df_filtrado[
+    df_filtrado["STATUS_BASE"].isin(["VENDA GERADA", "VENDA INFORMADA"])
+].copy()
+
+if not df_vendas_ref.empty:
+    # chave cliente
+    df_vendas_ref["CHAVE_CLIENTE"] = (
+        df_vendas_ref["NOME_CLIENTE_BASE"].fillna("NÃO INFORMADO")
+        + " | "
+        + df_vendas_ref["CPF_CLIENTE_BASE"].fillna("")
+    )
+
+    # ordena por data e pega só a ÚLTIMA linha de cada cliente (status final)
+    df_vendas_ref = df_vendas_ref.sort_values("DIA")
+    df_vendas_ult = df_vendas_ref.groupby("CHAVE_CLIENTE").tail(1)
+
+    venda_gerada = (df_vendas_ult["STATUS_BASE"] == "VENDA GERADA").sum()
+    venda_informada = (df_vendas_ult["STATUS_BASE"] == "VENDA INFORMADA").sum()
+    vendas_total = int(venda_gerada + venda_informada)
+
+    # VGV apenas das vendas finais de cada cliente
+    vgv_total = df_vendas_ult["VGV"].sum()
+    maior_vgv = df_vendas_ult["VGV"].max() if vendas_total > 0 else 0
+else:
+    venda_gerada = 0
+    venda_informada = 0
+    vendas_total = 0
+    vgv_total = 0
+    maior_vgv = 0
+
 ticket_medio = (vgv_total / vendas_total) if vendas_total > 0 else 0
 
 taxa_aprov_analise = (aprovacoes / analises_total * 100) if analises_total else 0
@@ -268,9 +349,9 @@ c3.metric("Aprovações", aprovacoes)
 c4.metric("Reprovações", reprovacoes)
 
 c5, c6, c7 = st.columns(3)
-c5.metric("Vendas GERADAS", venda_gerada)
-c6.metric("Vendas INFORMADAS", venda_informada)
-c7.metric("Total Vendas", vendas_total)
+c5.metric("Vendas GERADAS (clientes)", int(venda_gerada))
+c6.metric("Vendas INFORMADAS (clientes)", int(venda_informada))
+c7.metric("Total Vendas (clientes)", int(vendas_total))
 
 c8, c9, c10 = st.columns(3)
 c8.metric("Aprov./Análises", f"{taxa_aprov_analise:.1f}%")
@@ -318,12 +399,22 @@ else:
 # INDICADORES DE VGV
 # ---------------------------------------------------------
 st.markdown("---")
-st.subheader("💰 Indicadores de VGV")
+st.subheader("💰 Indicadores de VGV (apenas clientes com venda)")
+
 
 c11, c12, c13 = st.columns(3)
-c11.metric("VGV Total", f"R$ {vgv_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-c12.metric("Ticket Médio", f"R$ {ticket_medio:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-c13.metric("Maior VGV", f"R$ {maior_vgv:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+c11.metric(
+    "VGV Total",
+    f"R$ {vgv_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+)
+c12.metric(
+    "Ticket Médio",
+    f"R$ {ticket_medio:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+)
+c13.metric(
+    "Maior VGV",
+    f"R$ {maior_vgv:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+)
 
 st.markdown(
     "<hr><p style='text-align:center; color:#6b7280;'>"
