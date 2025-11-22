@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests
-import os
-import pickle
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 
-from utils.supremo_config import TOKEN_SUPREMO
+from utils.supremo_config import TOKEN_SUPREMO  # mantido se você usar em outros pontos
+from utils.leads_cache import carregar_leads    # 🔥 novo módulo de cache
 
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DA PÁGINA
@@ -156,140 +154,10 @@ if df.empty:
     st.stop()
 
 # ---------------------------------------------------------
-# API LEADS – SUPREMO (CACHE EM DISCO .PKL)
+# LEADS – USANDO MÓDULO DE CACHE
 # ---------------------------------------------------------
-BASE_URL_LEADS = "https://api.supremocrm.com.br/v1/leads"
+df_leads = carregar_leads()  # 🔥 aqui usa o cache .pkl de 30min
 
-CACHE_DIR = "cache"
-CACHE_FILE = os.path.join(CACHE_DIR, "leads_cache.pkl")
-CACHE_TTL_MINUTES = 30  # 30 minutos de vida do cache
-
-# Garante que a pasta existe
-os.makedirs(CACHE_DIR, exist_ok=True)
-
-
-def get_leads_page(pagina: int = 1) -> pd.DataFrame:
-    """Busca uma página de leads na API do Supremo."""
-    headers = {"Authorization": f"Bearer {TOKEN_SUPREMO}"}
-    params = {"pagina": pagina}
-
-    try:
-        resp = requests.get(BASE_URL_LEADS, headers=headers, params=params, timeout=30)
-    except Exception as e:
-        st.error(f"Erro ao conectar na API de leads: {e}")
-        return pd.DataFrame()
-
-    if resp.status_code != 200:
-        st.warning(f"API de leads retornou status {resp.status_code}.")
-        return pd.DataFrame()
-
-    try:
-        data = resp.json()
-    except Exception as e:
-        st.warning(f"Erro ao decodificar JSON dos leads: {e}")
-        return pd.DataFrame()
-
-    if isinstance(data, dict) and "data" in data:
-        return pd.DataFrame(data["data"])
-    if isinstance(data, list):
-        return pd.DataFrame(data)
-
-    return pd.DataFrame()
-
-
-def carregar_leads_from_cache() -> pd.DataFrame | None:
-    """Carrega leads do arquivo .pkl se o cache ainda estiver válido."""
-    if not os.path.exists(CACHE_FILE):
-        return None
-
-    try:
-        with open(CACHE_FILE, "rb") as f:
-            cache_data = pickle.load(f)
-    except Exception as e:
-        st.warning(f"Não foi possível ler o cache de leads: {e}")
-        return None
-
-    ts = cache_data.get("timestamp")
-    df_cached = cache_data.get("df")
-
-    if ts is None or df_cached is None:
-        return None
-
-    # verifica se o cache expirou
-    if datetime.now() - ts > timedelta(minutes=CACHE_TTL_MINUTES):
-        return None
-
-    return df_cached
-
-
-def salvar_leads_no_cache(df_leads: pd.DataFrame) -> None:
-    """Salva leads + timestamp em arquivo .pkl (mesmo se estiver vazio)."""
-    try:
-        payload = {
-            "timestamp": datetime.now(),
-            "df": df_leads
-        }
-        with open(CACHE_FILE, "wb") as f:
-            pickle.dump(payload, f)
-    except Exception as e:
-        # não quebra o app se der erro no cache
-        st.warning(f"Não foi possível salvar o cache de leads: {e}")
-
-
-def carregar_leads(limit: int = 1000, max_pages: int = 100) -> pd.DataFrame:
-    """
-    Carrega leads usando cache em disco.
-    1) Se o cache for recente (< 30 min), usa o cache.
-    2) Senão, chama a API, consolida os leads, salva o cache e devolve.
-    SEMPRE tenta criar o arquivo .pkl, mesmo se vier vazio.
-    """
-    # 1) tenta cache
-    df_cache = carregar_leads_from_cache()
-    if df_cache is not None:
-        return df_cache
-
-    # 2) busca na API
-    dfs = []
-    total = 0
-    pagina = 1
-
-    while total < limit and pagina <= max_pages:
-        df_page = get_leads_page(pagina)
-        if df_page.empty:
-            break
-
-        dfs.append(df_page)
-        total += len(df_page)
-        pagina += 1
-
-    if dfs:
-        df_all = pd.concat(dfs, ignore_index=True)
-
-        # remove duplicados por ID, se existir
-        if "id" in df_all.columns:
-            df_all = df_all.drop_duplicates(subset="id")
-
-        df_all = df_all.head(limit)
-
-        # converte data_captura se existir
-        if "data_captura" in df_all.columns:
-            df_all["data_captura"] = pd.to_datetime(
-                df_all["data_captura"], errors="coerce"
-            )
-    else:
-        # mesmo sem leads, cria DataFrame vazio
-        df_all = pd.DataFrame()
-
-    # 3) salva no cache (sempre)
-    salvar_leads_no_cache(df_all)
-
-    return df_all
-
-
-# Carrega leads (usando cache em disco)
-df_leads = carregar_leads()
-
-# guarda no session_state (se quiser reaproveitar em outras páginas)
 if "df_leads" not in st.session_state:
     st.session_state["df_leads"] = df_leads
 
