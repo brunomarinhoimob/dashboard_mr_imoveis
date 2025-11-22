@@ -51,7 +51,7 @@ st.markdown(
 # ---------------------------------------------------------
 LOGO_PATH = "logo_mr.png"
 try:
-    st.sidebar.image(LOGO_PATH, use_column_width=True)
+    st.sidebar.image(LOGO_PATH, use_container_width=True)
 except Exception:
     pass
 
@@ -462,6 +462,7 @@ else:
 # ---------------------------------------------------------
 st.markdown("---")
 st.subheader("💰 Indicadores de VGV (apenas clientes com venda)")
+
 
 def format_currency(valor: float) -> str:
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
