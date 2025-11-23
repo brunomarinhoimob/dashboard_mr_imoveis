@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
-from datetime import timedelta
+import requests
+from datetime import timedelta, datetime
 
-from utils.leads_cache import carregar_leads, obter_timestamp_cache
+from utils.supremo_config import TOKEN_SUPREMO
 
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DA PÁGINA
@@ -66,8 +67,7 @@ def limpar_para_data(serie: pd.Series) -> pd.Series:
 
 def carregar_dados_planilha() -> pd.DataFrame:
     """
-    Carrega SEM cache do Streamlit, pra sempre pegar a versão mais recente
-    da planilha. Qualquer cache/control fica por conta do próprio Google Sheets.
+    Carrega SEM cache do Streamlit, sempre pega a versão atual da planilha.
     """
     df = pd.read_csv(CSV_URL)
     df.columns = [c.strip().upper() for c in df.columns]
@@ -154,11 +154,77 @@ if df.empty:
     st.stop()
 
 # ---------------------------------------------------------
-# LEADS – USANDO CACHE CENTRAL
+# LEADS – CHAMADA DIRETA NA API (SEM CACHE)
 # ---------------------------------------------------------
-df_leads = carregar_leads()
-ts_cache = obter_timestamp_cache()
+BASE_URL_LEADS = "https://api.supremocrm.com.br/v1/leads"
 
+
+def carregar_leads_direto(limit: int = 1000, max_pages: int = 100) -> pd.DataFrame:
+    """
+    Busca os leads diretamente na API do Supremo, sem usar cache em disco
+    e sem st.cache_data. Chama a API sempre que a página é executada.
+    """
+    headers = {"Authorization": f"Bearer {TOKEN_SUPREMO}"}
+
+    dfs = []
+    total = 0
+    pagina = 1
+
+    while total < limit and pagina <= max_pages:
+        params = {"pagina": pagina}
+        try:
+            resp = requests.get(
+                BASE_URL_LEADS,
+                headers=headers,
+                params=params,
+                timeout=30,
+            )
+        except Exception as e:
+            # Se der erro de conexão, interrompe e usa o que já veio
+            break
+
+        if resp.status_code != 200:
+            break
+
+        try:
+            data = resp.json()
+        except Exception:
+            break
+
+        if isinstance(data, dict) and "data" in data:
+            df_page = pd.DataFrame(data["data"])
+        elif isinstance(data, list):
+            df_page = pd.DataFrame(data)
+        else:
+            df_page = pd.DataFrame()
+
+        if df_page.empty:
+            break
+
+        dfs.append(df_page)
+        total += len(df_page)
+        pagina += 1
+
+    if not dfs:
+        return pd.DataFrame()
+
+    df_all = pd.concat(dfs, ignore_index=True)
+
+    if "id" in df_all.columns:
+        df_all = df_all.drop_duplicates(subset="id")
+
+    if "data_captura" in df_all.columns:
+        df_all["data_captura"] = pd.to_datetime(
+            df_all["data_captura"], errors="coerce"
+        )
+
+    return df_all.head(limit)
+
+
+df_leads = carregar_leads_direto()
+ts_atualizacao_leads = datetime.now()
+
+# Guarda em sessão só pra reaproveitar dentro da mesma sessão (não tem disco)
 if "df_leads" not in st.session_state:
     st.session_state["df_leads"] = df_leads
 
@@ -218,11 +284,10 @@ st.caption(
     f"Registros filtrados: {registros_filtrados}"
 )
 
-# Mostra hora da última atualização dos leads (pra você ver que não é 1 em 1 min)
-if ts_cache is not None:
-    st.caption(f"🕒 Última atualização dos leads (Supremo): {ts_cache.strftime('%d/%m/%Y %H:%M:%S')}")
-else:
-    st.caption("🕒 Leads ainda não carregados do cache.")
+# Mostra hora da atualização dos leads (agora, sem cache)
+st.caption(
+    f"🕒 Leads (Supremo) carregados em: {ts_atualizacao_leads.strftime('%d/%m/%Y %H:%M:%S')}"
+)
 
 # ---------------------------------------------------------
 # CÁLCULOS PRINCIPAIS
