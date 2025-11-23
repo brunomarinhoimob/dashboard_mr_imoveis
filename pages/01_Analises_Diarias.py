@@ -117,7 +117,7 @@ lista_corretor = sorted(df["CORRETOR"].unique())
 corretor_sel = st.sidebar.selectbox("Corretor", ["Todos"] + lista_corretor)
 
 # ---------------------------------------------------------
-# BASE DE ANÁLISES DO DIA  — APENAS "EM ANÁLISE"
+# BASE DE ANÁLISES DO DIA  — APENAS "EM ANÁLISE" (SEM REANÁLISE)
 # ---------------------------------------------------------
 st.caption(
     f"Dia selecionado: **{dia_escolhido.strftime('%d/%m/%Y')}** "
@@ -141,16 +141,18 @@ if col_situacao:
     status_norm = status_upper.apply(remover_acentos)
 
     # 🔥 FILTRO DEFINITIVO:
-    # Só entra se começar com "EM ANALISE"
-    # (isso pega "EM ANALISE", "EM ANALISE - ALGUMA COISA", etc.)
-    mask_analise = status_norm.str.startswith("EM ANALISE")
+    # 1) Começa com "EM ANALISE"
+    # 2) NÃO contém "REANALISE" em nenhuma parte do texto
+    mask_analise = status_norm.str.startswith("EM ANALISE") & ~status_norm.str.contains(
+        "REANALISE"
+    )
 
     df_analise_base = df[mask_analise].copy()
 else:
     df_analise_base = pd.DataFrame()
 
 if df_analise_base.empty:
-    st.info("Não há lançamentos com situação começando por 'EM ANÁLISE'.")
+    st.info("Não há lançamentos com situação começando por 'EM ANÁLISE' (sem REANÁLISE).")
     st.stop()
 
 # Apenas o dia escolhido
@@ -167,7 +169,7 @@ qtde_total_dia = len(df_dia)
 
 if qtde_total_dia == 0:
     st.warning(
-        f"Nenhuma ANÁLISE (situação iniciando por 'EM ANÁLISE') no dia "
+        f"Nenhuma ANÁLISE (situação iniciando por 'EM ANÁLISE' e sem 'REANÁLISE') no dia "
         f"{dia_escolhido.strftime('%d/%m/%Y')} com esses filtros."
     )
     st.stop()
@@ -183,7 +185,7 @@ with c2:
         f"### Hoje já foram registradas **{qtde_total_dia} análises** "
         f"no dia **{dia_escolhido.strftime('%d/%m/%Y')}**, "
         "considerando apenas situações que começam com **EM ANÁLISE** "
-        "(sem REANÁLISE, APROVAÇÃO, VENDA, etc.)."
+        "e **não** contêm **REANÁLISE** (sem APROVAÇÃO, VENDA, etc.)."
     )
 
 st.markdown("---")
@@ -198,7 +200,7 @@ with col_eq:
     analises_equipe = (
         df_dia.groupby("EQUIPE")
         .size()
-       .reset_index(name="ANÁLISES")
+        .reset_index(name="ANÁLISES")
         .sort_values("ANÁLISES", ascending=False)
     )
     total_row = pd.DataFrame(
@@ -224,7 +226,8 @@ st.markdown(
     "<hr style='border-color:#1f2937'>"
     "<p style='text-align:center; color:#6b7280;'>"
     "Painel de Análises Diárias — conta apenas situação iniciando por "
-    "'EM ANÁLISE' (sem REANÁLISE). Atualiza a cada 60 segundos."
+    "'EM ANÁLISE' e exclui qualquer linha com 'REANÁLISE'. "
+    "Atualiza a cada 60 segundos."
     "</p>",
     unsafe_allow_html=True,
 )
