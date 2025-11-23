@@ -73,7 +73,8 @@ def carregar_dados():
         else:
             df[col] = "NÃO INFORMADO"
 
-    # SITUAÇÃO BASE
+    # SITUAÇÃO BASE (pode ser usado em outras páginas,
+    # mas AQUI vamos filtrar diretamente na coluna original)
     possiveis_cols_situacao = [
         "SITUAÇÃO", "SITUAÇÃO ATUAL", "STATUS",
         "SITUACAO", "SITUACAO ATUAL"
@@ -83,12 +84,10 @@ def carregar_dados():
     df["STATUS_BASE"] = ""
     if col_situacao:
         status = df[col_situacao].fillna("").astype(str).str.upper()
-
         df.loc[status.str.contains("EM ANÁLISE"), "STATUS_BASE"] = "EM ANÁLISE"
         df.loc[status.str.contains("REANÁLISE"), "STATUS_BASE"] = "REANÁLISE"
 
     return df
-
 
 df = carregar_dados()
 
@@ -119,21 +118,37 @@ lista_corretor = sorted(df["CORRETOR"].unique())
 corretor_sel = st.sidebar.selectbox("Corretor", ["Todos"] + lista_corretor)
 
 # ---------------------------------------------------------
-# BASE DE ANÁLISES DO DIA  — APENAS "EM ANÁLISE"
+# BASE DE ANÁLISES DO DIA  — APENAS ANÁLISE (SEM REANÁLISE)
 # ---------------------------------------------------------
 st.caption(
     f"Dia selecionado: **{dia_escolhido.strftime('%d/%m/%Y')}** "
     "• Atualiza automaticamente a cada 1 minuto."
 )
 
-df_analise_base = df[df["STATUS_BASE"] == "EM ANÁLISE"].copy()
+# 👉 Reencontrar a coluna de situação na base carregada
+possiveis_cols_situacao = [
+    "SITUAÇÃO", "SITUAÇÃO ATUAL", "STATUS",
+    "SITUACAO", "SITUACAO ATUAL"
+]
+col_situacao = next((c for c in possiveis_cols_situacao if c in df.columns), None)
+
+if col_situacao:
+    status = df[col_situacao].fillna("").astype(str).str.upper()
+    # Só queremos o que tem "ANÁLISE" mas NÃO tem "REANÁLISE"
+    mask_analise = status.str.contains("ANÁLISE") & ~status.str.contains("REANÁLISE")
+    df_analise_base = df[mask_analise].copy()
+else:
+    # fallback: se por algum motivo não achar coluna, usa STATUS_BASE EM ANÁLISE
+    df_analise_base = df[df["STATUS_BASE"] == "EM ANÁLISE"].copy()
 
 if df_analise_base.empty:
-    st.info("Não há análises com status EM ANÁLISE.")
+    st.info("Não há análises (sem reanálise) registradas na base.")
     st.stop()
 
+# Só o dia escolhido
 df_dia = df_analise_base[df_analise_base["DIA"] == dia_escolhido]
 
+# Filtros
 if equipe_sel != "Todas":
     df_dia = df_dia[df_dia["EQUIPE"] == equipe_sel]
 
@@ -144,7 +159,7 @@ qtde_total_dia = len(df_dia)
 
 if qtde_total_dia == 0:
     st.warning(
-        f"Nenhuma ANÁLISE (EM ANÁLISE) no dia "
+        f"Nenhuma ANÁLISE (sem REANÁLISE) no dia "
         f"{dia_escolhido.strftime('%d/%m/%Y')} com esses filtros."
     )
     st.stop()
@@ -158,7 +173,8 @@ with c1:
 with c2:
     st.markdown(
         f"### Hoje já foram registradas **{qtde_total_dia} análises** "
-        f"no dia **{dia_escolhido.strftime('%d/%m/%Y')}**."
+        f"no dia **{dia_escolhido.strftime('%d/%m/%Y')}**, "
+        "desconsiderando REANÁLISE."
     )
 
 st.markdown("---")
@@ -196,7 +212,8 @@ with col_corr:
 st.markdown(
     "<hr style='border-color:#1f2937'>"
     "<p style='text-align:center; color:#6b7280;'>"
-    "Painel de Análises Diárias — ideal para TV. Atualiza a cada 60 segundos."
+    "Painel de Análises Diárias — conta apenas ANÁLISE (sem REANÁLISE). "
+    "Atualiza a cada 60 segundos."
     "</p>",
     unsafe_allow_html=True,
 )
